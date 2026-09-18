@@ -13,6 +13,13 @@ export interface RealtimeResources {
   remoteAudio?: HTMLAudioElement | null;
 }
 
+export type OpeningStatus = "opening" | "conversation_active";
+
+export interface HintSendOutcome {
+  hintPending: boolean;
+  error: string | null;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
 }
@@ -47,7 +54,11 @@ export function parseLiveServerEvent(data: unknown): ParsedLiveServerEvent {
     };
   }
 
-  if (value.type === "session.output_transcript.delta") {
+  if (
+    value.type === "session.output_transcript.delta" &&
+    typeof value.delta === "string" &&
+    value.delta.length > 0
+  ) {
     return { type: "session.output_transcript.delta" };
   }
 
@@ -80,6 +91,59 @@ export function canRequestHint(
   dataChannelState: "connecting" | "open" | "closing" | "closed" | null,
 ): boolean {
   return conversationIsActive && dataChannelState === "open";
+}
+
+export function safeSendLiveEvent(
+  dataChannel: RTCDataChannel | null,
+  event: string,
+): boolean {
+  if (!dataChannel || dataChannel.readyState !== "open") {
+    return false;
+  }
+
+  try {
+    dataChannel.send(event);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function sendHintLiveEvent(
+  dataChannel: RTCDataChannel | null,
+  event: string,
+): HintSendOutcome {
+  return safeSendLiveEvent(dataChannel, event)
+    ? { hintPending: true, error: null }
+    : {
+        hintPending: false,
+        error: "The hint request could not be sent. You can keep talking or try again.",
+      };
+}
+
+export function sendCloseLiveEvent(
+  dataChannel: RTCDataChannel | null,
+  event: string,
+  completeLocally: () => void,
+): "ending" | "completed" {
+  if (safeSendLiveEvent(dataChannel, event)) {
+    return "ending";
+  }
+
+  completeLocally();
+  return "completed";
+}
+
+export function advanceOpeningStatus(
+  status: OpeningStatus,
+  openingAccepted: boolean,
+  event: ParsedLiveServerEvent,
+): OpeningStatus {
+  return status === "opening" &&
+    openingAccepted &&
+    event.type === "session.output_transcript.delta"
+    ? "conversation_active"
+    : status;
 }
 
 export function releaseRealtimeResources(resources: RealtimeResources): void {

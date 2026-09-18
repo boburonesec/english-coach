@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  advanceOpeningStatus,
   canRequestHint,
   createHintCommand,
   parseLiveServerEvent,
   releaseRealtimeResources,
+  safeSendLiveEvent,
+  sendCloseLiveEvent,
+  sendHintLiveEvent,
   setMicrophoneEnabled,
 } from "../app/today/realtime-session-protocol";
 
@@ -26,6 +30,25 @@ describe("realtime session protocol", () => {
     expect(parseLiveServerEvent(JSON.stringify({ type: "future.event", value: 1 }))).toEqual({
       type: "unknown",
     });
+    expect(
+      parseLiveServerEvent(JSON.stringify({ type: "session.output_transcript.delta" })),
+    ).toEqual({ type: "unknown" });
+  });
+
+  it("keeps opening pending on acknowledgement and activates on output evidence", () => {
+    const acknowledged = parseLiveServerEvent(
+      JSON.stringify({
+        type: "session.commentary.appended",
+        client_event_id: "opening_1",
+      }),
+    );
+    const output = parseLiveServerEvent(
+      JSON.stringify({ type: "session.output_transcript.delta", delta: "Hello" }),
+    );
+
+    expect(advanceOpeningStatus("opening", true, acknowledged)).toBe("opening");
+    expect(advanceOpeningStatus("opening", false, output)).toBe("opening");
+    expect(advanceOpeningStatus("opening", true, output)).toBe("conversation_active");
   });
 
   it("creates a narrow explicit-hint signal", () => {
@@ -42,6 +65,75 @@ describe("realtime session protocol", () => {
     expect(canRequestHint(false, "open")).toBe(false);
     expect(canRequestHint(true, "closed")).toBe(false);
     expect(canRequestHint(true, "open")).toBe(true);
+  });
+
+  it("contains a throwing data-channel send and reports failure", () => {
+    const send = vi.fn(() => {
+      throw new DOMException("The channel closed during send.", "InvalidStateError");
+    });
+    const dataChannel = {
+      readyState: "open",
+      send,
+    } as unknown as RTCDataChannel;
+
+    expect(safeSendLiveEvent(dataChannel, "{}")).toBe(false);
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it("clears pending hint state after a send failure", () => {
+    const dataChannel = {
+      readyState: "open",
+      send: vi.fn(() => {
+        throw new DOMException("The channel closed during send.", "InvalidStateError");
+      }),
+    } as unknown as RTCDataChannel;
+
+    expect(sendHintLiveEvent(dataChannel, "{}")).toEqual({
+      hintPending: false,
+      error: "The hint request could not be sent. You can keep talking or try again.",
+    });
+  });
+
+  it("completes and cleans up immediately after a close send failure", () => {
+    const stop = vi.fn();
+    const closePeer = vi.fn();
+    const localStream = {
+      getTracks: () => [{ onended: vi.fn(), stop }],
+    } as unknown as MediaStream;
+    const peerConnection = {
+      close: closePeer,
+      ontrack: vi.fn(),
+      onconnectionstatechange: vi.fn(),
+    } as unknown as RTCPeerConnection;
+    const dataChannel = {
+      readyState: "open",
+      send: vi.fn(() => {
+        throw new DOMException("The channel closed during send.", "InvalidStateError");
+      }),
+      close: vi.fn(),
+      onmessage: vi.fn(),
+      onerror: vi.fn(),
+      onclose: vi.fn(),
+    } as unknown as RTCDataChannel;
+    const completeLocally = vi.fn(() => {
+      releaseRealtimeResources({ dataChannel, peerConnection, localStream });
+    });
+
+    expect(sendCloseLiveEvent(dataChannel, "{}", completeLocally)).toBe("completed");
+    expect(completeLocally).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledOnce();
+    expect(closePeer).toHaveBeenCalledOnce();
+  });
+
+  it("does not send through a channel that is no longer open", () => {
+    const send = vi.fn();
+    const dataChannel = {
+      readyState: "closing",
+      send,
+    } as unknown as RTCDataChannel;
+
+    expect(safeSendLiveEvent(dataChannel, "{}")).toBe(false);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("stops media and closes every active resource", () => {

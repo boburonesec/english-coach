@@ -3,12 +3,16 @@
 import type { CreateRealtimeSessionResponse } from "@english-coach/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  advanceOpeningStatus,
   canRequestHint,
   createCloseCommand,
   createHintCommand,
   createOpeningCommand,
   parseLiveServerEvent,
   releaseRealtimeResources,
+  safeSendLiveEvent,
+  sendCloseLiveEvent,
+  sendHintLiveEvent,
   setMicrophoneEnabled,
 } from "./realtime-session-protocol";
 
@@ -141,6 +145,7 @@ export function useRealtimeSession() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeAttemptRef = useRef<symbol | null>(null);
   const openingEventIdRef = useRef<string | null>(null);
+  const openingAcceptedRef = useRef(false);
   const hintEventIdRef = useRef<string | null>(null);
   const commandTimeoutRef = useRef<number | null>(null);
   const hintTimeoutRef = useRef<number | null>(null);
@@ -178,6 +183,7 @@ export function useRealtimeSession() {
     clearTimers();
     activeAttemptRef.current = null;
     openingEventIdRef.current = null;
+    openingAcceptedRef.current = false;
     hintEventIdRef.current = null;
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
@@ -347,10 +353,7 @@ export function useRealtimeSession() {
                 commandTimeoutRef.current = null;
               }
               openingEventIdRef.current = null;
-              updateState((current) => ({
-                ...current,
-                status: "conversation_active",
-              }));
+              openingAcceptedRef.current = true;
             } else if (event.clientEventId === hintEventIdRef.current) {
               if (hintTimeoutRef.current !== null) {
                 window.clearTimeout(hintTimeoutRef.current);
@@ -358,6 +361,21 @@ export function useRealtimeSession() {
               }
               hintEventIdRef.current = null;
               updateState((current) => ({ ...current, hintPending: false }));
+            }
+            return;
+          }
+
+          if (
+            event.type === "session.output_transcript.delta" &&
+            stateRef.current.status === "opening"
+          ) {
+            const status = advanceOpeningStatus(
+              stateRef.current.status,
+              openingAcceptedRef.current,
+              event,
+            );
+            if (status !== stateRef.current.status) {
+              updateState((current) => ({ ...current, status }));
             }
             return;
           }
@@ -443,12 +461,16 @@ export function useRealtimeSession() {
         setMicrophoneEnabled(stream, true);
         const openingEventId = nextEventId("opening");
         openingEventIdRef.current = openingEventId;
+        openingAcceptedRef.current = false;
         transition({
           ...initialState,
           status: "opening",
           sessionId: session.sessionId,
         });
-        dataChannel.send(createOpeningCommand(openingEventId));
+        if (!safeSendLiveEvent(dataChannel, createOpeningCommand(openingEventId))) {
+          failSession("The conversation opening could not be sent. Try starting again.", attempt);
+          return;
+        }
         commandTimeoutRef.current = window.setTimeout(
           () => failSession("The provider did not accept the conversation opening.", attempt),
           COMMAND_TIMEOUT_MS,
@@ -491,9 +513,17 @@ export function useRealtimeSession() {
     }
 
     const eventId = nextEventId("hint");
+    const outcome = sendHintLiveEvent(dataChannel, createHintCommand(eventId));
+    if (!outcome.hintPending) {
+      hintEventIdRef.current = null;
+      updateState((current) => ({
+        ...current,
+        ...outcome,
+      }));
+      return;
+    }
     hintEventIdRef.current = eventId;
-    updateState((current) => ({ ...current, hintPending: true, error: null }));
-    dataChannel.send(createHintCommand(eventId));
+    updateState((current) => ({ ...current, ...outcome }));
     hintTimeoutRef.current = window.setTimeout(() => {
       hintEventIdRef.current = null;
       hintTimeoutRef.current = null;
@@ -521,13 +551,20 @@ export function useRealtimeSession() {
     if (stream) {
       setMicrophoneEnabled(stream, false);
     }
+    const closeStatus = sendCloseLiveEvent(
+      dataChannel,
+      createCloseCommand(nextEventId("close")),
+      () => completeSession("The conversation ended locally without provider confirmation."),
+    );
+    if (closeStatus === "completed") {
+      return;
+    }
     transition({
       ...stateRef.current,
-      status: "ending",
+      status: closeStatus,
       hintPending: false,
       error: null,
     });
-    dataChannel.send(createCloseCommand(nextEventId("close")));
     closeTimeoutRef.current = window.setTimeout(
       () => completeSession("The provider did not confirm final session closure."),
       CLOSE_TIMEOUT_MS,
