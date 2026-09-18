@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  advanceOpeningStatus,
+  advanceOpeningProgress,
   canRequestHint,
   createHintCommand,
+  createOpeningProgress,
   parseLiveServerEvent,
   releaseRealtimeResources,
   safeSendLiveEvent,
@@ -35,20 +36,44 @@ describe("realtime session protocol", () => {
     ).toEqual({ type: "unknown" });
   });
 
-  it("keeps opening pending on acknowledgement and activates on output evidence", () => {
-    const acknowledged = parseLiveServerEvent(
-      JSON.stringify({
-        type: "session.commentary.appended",
-        client_event_id: "opening_1",
-      }),
+  it("activates opening after acknowledgement then output", () => {
+    const afterAcknowledgement = advanceOpeningProgress(
+      createOpeningProgress(),
+      "accepted",
     );
-    const output = parseLiveServerEvent(
-      JSON.stringify({ type: "session.output_transcript.delta", delta: "Hello" }),
+    const afterOutput = advanceOpeningProgress(
+      afterAcknowledgement.progress,
+      "output_started",
     );
 
-    expect(advanceOpeningStatus("opening", true, acknowledged)).toBe("opening");
-    expect(advanceOpeningStatus("opening", false, output)).toBe("opening");
-    expect(advanceOpeningStatus("opening", true, output)).toBe("conversation_active");
+    expect(afterAcknowledgement.status).toBe("opening");
+    expect(afterOutput).toEqual({
+      progress: { openingAccepted: true, openingOutputStarted: true },
+      status: "conversation_active",
+    });
+  });
+
+  it("activates opening after output then acknowledgement", () => {
+    const afterOutput = advanceOpeningProgress(
+      createOpeningProgress(),
+      "output_started",
+    );
+    const afterAcknowledgement = advanceOpeningProgress(afterOutput.progress, "accepted");
+
+    expect(afterOutput.status).toBe("opening");
+    expect(afterAcknowledgement).toEqual({
+      progress: { openingAccepted: true, openingOutputStarted: true },
+      status: "conversation_active",
+    });
+  });
+
+  it("does not activate opening after only one required signal", () => {
+    expect(advanceOpeningProgress(createOpeningProgress(), "accepted").status).toBe(
+      "opening",
+    );
+    expect(advanceOpeningProgress(createOpeningProgress(), "output_started").status).toBe(
+      "opening",
+    );
   });
 
   it("creates a narrow explicit-hint signal", () => {

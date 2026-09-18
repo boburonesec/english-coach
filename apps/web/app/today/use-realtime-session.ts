@@ -3,11 +3,12 @@
 import type { CreateRealtimeSessionResponse } from "@english-coach/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  advanceOpeningStatus,
+  advanceOpeningProgress,
   canRequestHint,
   createCloseCommand,
   createHintCommand,
   createOpeningCommand,
+  createOpeningProgress,
   parseLiveServerEvent,
   releaseRealtimeResources,
   safeSendLiveEvent,
@@ -19,6 +20,7 @@ import {
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const READY_TIMEOUT_MS = 30_000;
 const COMMAND_TIMEOUT_MS = 10_000;
+const OPENING_OUTPUT_TIMEOUT_MS = 15_000;
 const CLOSE_TIMEOUT_MS = 15_000;
 
 export type RealtimeSessionStatus =
@@ -145,9 +147,10 @@ export function useRealtimeSession() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeAttemptRef = useRef<symbol | null>(null);
   const openingEventIdRef = useRef<string | null>(null);
-  const openingAcceptedRef = useRef(false);
+  const openingProgressRef = useRef(createOpeningProgress());
   const hintEventIdRef = useRef<string | null>(null);
   const commandTimeoutRef = useRef<number | null>(null);
+  const openingOutputTimeoutRef = useRef<number | null>(null);
   const hintTimeoutRef = useRef<number | null>(null);
   const closeTimeoutRef = useRef<number | null>(null);
   const eventSequenceRef = useRef(0);
@@ -169,6 +172,10 @@ export function useRealtimeSession() {
       window.clearTimeout(commandTimeoutRef.current);
       commandTimeoutRef.current = null;
     }
+    if (openingOutputTimeoutRef.current !== null) {
+      window.clearTimeout(openingOutputTimeoutRef.current);
+      openingOutputTimeoutRef.current = null;
+    }
     if (closeTimeoutRef.current !== null) {
       window.clearTimeout(closeTimeoutRef.current);
       closeTimeoutRef.current = null;
@@ -183,7 +190,7 @@ export function useRealtimeSession() {
     clearTimers();
     activeAttemptRef.current = null;
     openingEventIdRef.current = null;
-    openingAcceptedRef.current = false;
+    openingProgressRef.current = createOpeningProgress();
     hintEventIdRef.current = null;
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
@@ -340,6 +347,21 @@ export function useRealtimeSession() {
           }
           const event = parseLiveServerEvent(data);
 
+          const recordOpeningSignal = (signal: "accepted" | "output_started") => {
+            const result = advanceOpeningProgress(openingProgressRef.current, signal);
+            openingProgressRef.current = result.progress;
+
+            if (result.status === "conversation_active") {
+              if (openingOutputTimeoutRef.current !== null) {
+                window.clearTimeout(openingOutputTimeoutRef.current);
+                openingOutputTimeoutRef.current = null;
+              }
+              if (stateRef.current.status === "opening") {
+                updateState((current) => ({ ...current, status: result.status }));
+              }
+            }
+          };
+
           if (event.type === "session.started") {
             providerStarted = true;
             settleReady();
@@ -353,7 +375,21 @@ export function useRealtimeSession() {
                 commandTimeoutRef.current = null;
               }
               openingEventIdRef.current = null;
-              openingAcceptedRef.current = true;
+              recordOpeningSignal("accepted");
+              if (
+                stateRef.current.status === "opening" &&
+                openingProgressRef.current.openingAccepted &&
+                !openingProgressRef.current.openingOutputStarted &&
+                openingOutputTimeoutRef.current === null
+              ) {
+                openingOutputTimeoutRef.current = window.setTimeout(() => {
+                  openingOutputTimeoutRef.current = null;
+                  failSession(
+                    "The provider accepted the opening but did not start speaking. Try again.",
+                    attempt,
+                  );
+                }, OPENING_OUTPUT_TIMEOUT_MS);
+              }
             } else if (event.clientEventId === hintEventIdRef.current) {
               if (hintTimeoutRef.current !== null) {
                 window.clearTimeout(hintTimeoutRef.current);
@@ -369,14 +405,7 @@ export function useRealtimeSession() {
             event.type === "session.output_transcript.delta" &&
             stateRef.current.status === "opening"
           ) {
-            const status = advanceOpeningStatus(
-              stateRef.current.status,
-              openingAcceptedRef.current,
-              event,
-            );
-            if (status !== stateRef.current.status) {
-              updateState((current) => ({ ...current, status }));
-            }
+            recordOpeningSignal("output_started");
             return;
           }
 
@@ -461,7 +490,7 @@ export function useRealtimeSession() {
         setMicrophoneEnabled(stream, true);
         const openingEventId = nextEventId("opening");
         openingEventIdRef.current = openingEventId;
-        openingAcceptedRef.current = false;
+        openingProgressRef.current = createOpeningProgress();
         transition({
           ...initialState,
           status: "opening",

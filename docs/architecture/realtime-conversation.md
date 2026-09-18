@@ -26,7 +26,7 @@ Browser <==== WebRTC audio ====> OpenAI Live
 7. The browser applies the remote answer and waits for both the WebRTC connection and the Live `session.started` data-channel event before enabling meaningful microphone transmission.
 8. The browser enables the negotiated microphone track and sends a fixed `session.commentary.append` signal asking the model to begin. The full prompt and trusted topic remain server-side.
 9. A Hint click sends another fixed commentary signal. The server-owned prompt limits the result to a short phrase starter, word, or sentence structure and prohibits automatic hints.
-10. The opening acknowledgement only confirms that the command entered the provider timeline. The UI remains in `opening` until the first non-empty `session.output_transcript.delta` provides evidence that assistant output has begun.
+10. The opening acknowledgement only confirms that the command entered the provider timeline. The UI remains in `opening` until both command acceptance and the first non-empty `session.output_transcript.delta` have arrived, in either order. After acceptance, a bounded watchdog fails and cleans up the session if assistant output never starts; it does not estimate audio playback completion.
 11. End Conversation disables the microphone immediately, sends `session.close`, waits for `session.closed` where possible, then releases all local and remote media resources. If the close command cannot be sent, local cleanup completes immediately.
 
 The backend is the trusted control plane. `OPENAI_API_KEY` and provider response details remain server-side. The browser receives only the normalized session identifier and SDP answer needed to complete the peer connection.

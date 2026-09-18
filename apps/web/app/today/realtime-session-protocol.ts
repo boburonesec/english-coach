@@ -15,6 +15,13 @@ export interface RealtimeResources {
 
 export type OpeningStatus = "opening" | "conversation_active";
 
+export interface OpeningProgress {
+  openingAccepted: boolean;
+  openingOutputStarted: boolean;
+}
+
+export type OpeningSignal = "accepted" | "output_started";
+
 export interface HintSendOutcome {
   hintPending: boolean;
   error: string | null;
@@ -134,16 +141,29 @@ export function sendCloseLiveEvent(
   return "completed";
 }
 
-export function advanceOpeningStatus(
-  status: OpeningStatus,
-  openingAccepted: boolean,
-  event: ParsedLiveServerEvent,
-): OpeningStatus {
-  return status === "opening" &&
-    openingAccepted &&
-    event.type === "session.output_transcript.delta"
-    ? "conversation_active"
-    : status;
+export function createOpeningProgress(): OpeningProgress {
+  return {
+    openingAccepted: false,
+    openingOutputStarted: false,
+  };
+}
+
+export function advanceOpeningProgress(
+  progress: OpeningProgress,
+  signal: OpeningSignal,
+): { progress: OpeningProgress; status: OpeningStatus } {
+  const nextProgress = {
+    openingAccepted: progress.openingAccepted || signal === "accepted",
+    openingOutputStarted: progress.openingOutputStarted || signal === "output_started",
+  };
+
+  return {
+    progress: nextProgress,
+    status:
+      nextProgress.openingAccepted && nextProgress.openingOutputStarted
+        ? "conversation_active"
+        : "opening",
+  };
 }
 
 export function releaseRealtimeResources(resources: RealtimeResources): void {
