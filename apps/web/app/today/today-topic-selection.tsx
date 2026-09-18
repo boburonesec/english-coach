@@ -59,7 +59,12 @@ export function TodayTopicSelection() {
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const realtimeSession = useRealtimeSession();
-  const sessionIsBusy = !["idle", "error"].includes(realtimeSession.status);
+  const sessionIsBusy = !["idle", "error", "completed"].includes(
+    realtimeSession.status,
+  );
+  const conversationIsLive = ["opening", "conversation_active", "ending"].includes(
+    realtimeSession.status,
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -143,18 +148,65 @@ export function TodayTopicSelection() {
                 <strong>{selectedTopic.openingQuestion}</strong>
               </div>
               <div className="session-controls" aria-live="polite">
-                {realtimeSession.status === "connected" ? (
+                {conversationIsLive ? (
                   <>
+                    <div className="conversation-state">
+                      <div>
+                        <span>Conversation status</span>
+                        <strong>
+                          {realtimeSession.status === "opening"
+                            ? "AI is opening the conversation"
+                            : realtimeSession.status === "ending"
+                              ? "Ending conversation"
+                              : "Conversation live"}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Microphone</span>
+                        <strong>
+                          {realtimeSession.microphoneEnabled ? "On" : "Off"}
+                        </strong>
+                      </div>
+                    </div>
                     <p className="connection-status">
-                      Connected. Your microphone is muted for this setup check.
+                      Speak naturally. Corrections wait until a future post-conversation review.
                     </p>
-                    <button
-                      className="primary-action"
-                      type="button"
-                      onClick={realtimeSession.disconnect}
-                    >
-                      Disconnect
-                    </button>
+                    {realtimeSession.audioBlocked ? (
+                      <div className="audio-warning" role="alert">
+                        <span>Your browser blocked the conversation audio.</span>
+                        <button type="button" onClick={() => void realtimeSession.resumeAudio()}>
+                          Play audio
+                        </button>
+                      </div>
+                    ) : null}
+                    {realtimeSession.error ? (
+                      <p className="connection-error" role="alert">
+                        {realtimeSession.error}
+                      </p>
+                    ) : null}
+                    <div className="conversation-actions">
+                      <button
+                        className="secondary-action"
+                        type="button"
+                        disabled={
+                          realtimeSession.status !== "conversation_active" ||
+                          realtimeSession.hintPending
+                        }
+                        onClick={realtimeSession.requestHint}
+                      >
+                        {realtimeSession.hintPending ? "Hint requested…" : "Hint"}
+                      </button>
+                      <button
+                        className="end-action"
+                        type="button"
+                        disabled={realtimeSession.status === "ending"}
+                        onClick={realtimeSession.endConversation}
+                      >
+                        {realtimeSession.status === "ending"
+                          ? "Finishing…"
+                          : "End conversation"}
+                      </button>
+                    </div>
                   </>
                 ) : (
                   <>
@@ -164,6 +216,11 @@ export function TodayTopicSelection() {
                     {realtimeSession.status === "connecting" ? (
                       <p className="connection-status">
                         Connecting securely to the realtime provider…
+                      </p>
+                    ) : null}
+                    {realtimeSession.status === "completed" ? (
+                      <p className="connection-status">
+                        Conversation finished. You can start another one without refreshing.
                       </p>
                     ) : null}
                     {realtimeSession.error ? (
@@ -178,11 +235,11 @@ export function TodayTopicSelection() {
                       {realtimeSession.status === "requesting_microphone"
                         ? "Requesting microphone…"
                         : realtimeSession.status === "connecting"
-                          ? "Connecting…"
-                          : realtimeSession.status === "disconnecting"
-                            ? "Disconnecting…"
+                            ? "Connecting…"
+                          : realtimeSession.status === "completed"
+                            ? "Start another conversation"
                             : realtimeSession.status === "error"
-                              ? "Try connection again"
+                              ? "Try conversation again"
                               : "Start conversation"}
                     </button>
                   </>

@@ -19,6 +19,7 @@ import {
   LIVE_SESSION_PROVIDER,
   type LiveSessionProvider,
 } from "./realtime-session.provider";
+import { buildRealtimeConversationInstructions } from "./realtime-conversation.prompt";
 
 const MAX_SDP_LENGTH = 1_000_000;
 
@@ -57,12 +58,7 @@ export class RealtimeSessionService {
       throw new NotFoundException("Conversation topic not found.");
     }
 
-    const instructions = [
-      "You are establishing an English conversation session around the provided topic.",
-      `Topic context: ${topic.context}`,
-      `Opening question: ${topic.openingQuestion}`,
-      "Do not provide coaching or corrections. Wait for normal conversation input.",
-    ].join("\n");
+    const instructions = buildRealtimeConversationInstructions(topic);
 
     try {
       return await this.liveSessionProvider.createSession({

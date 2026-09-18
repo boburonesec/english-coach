@@ -5,7 +5,7 @@
 - Node.js 24 LTS
 - pnpm 11 (the exact expected version is in the root `packageManager` field)
 
-No database or container runtime is required. Topic selection runs without external services. A real Task 003 WebRTC handshake requires an OpenAI project API key and microphone access in a browser on localhost or HTTPS.
+No database or container runtime is required. Topic selection runs without external services. A real WebRTC conversation requires an OpenAI project API key, GPT-Live access, microphone access, and browser audio playback on localhost or HTTPS.
 
 ## Install
 
@@ -48,6 +48,8 @@ pnpm --filter @english-coach/worker dev
 
 The web app defaults to <http://localhost:3000>. The API defaults to <http://localhost:3001>; `GET /health` returns `{ "status": "ok" }`. The worker prints that it is idle because no job system is configured yet. Without `OPENAI_API_KEY`, topic selection remains available and `POST /realtime/sessions` returns a controlled `503` response.
 
+For a live smoke test, choose a topic on `/today`, start the conversation, grant microphone permission, listen for the concise opening question, speak for several turns, request one Hint, and end the conversation. Confirm the browser microphone indicator disappears and that a second conversation starts without refreshing. If autoplay is blocked, use the displayed Play audio action.
+
 ## Verify
 
 ```bash
@@ -65,4 +67,4 @@ pnpm --filter @english-coach/api start
 pnpm --filter @english-coach/worker start
 ```
 
-PostgreSQL, Prisma, and pg-boss remain intentionally unwired. OpenAI Live is used only for WebRTC session establishment; no conversation behavior or persistence exists yet.
+PostgreSQL, Prisma, and pg-boss remain intentionally unwired. OpenAI Live now handles the in-session spoken conversation and explicit hints. No transcript, review, conversation record, or learner state is persisted.
