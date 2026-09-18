@@ -1,0 +1,21 @@
+{
+  "name": "@english-coach/ai",
+  "version": "0.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "openai": "7.18.0"
+  }
+}

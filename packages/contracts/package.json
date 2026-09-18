@@ -1,0 +1,11 @@
+{
+  "name": "@english-coach/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  }
+}
