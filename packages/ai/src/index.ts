@@ -48,6 +48,21 @@ export class OpenAILiveSessionProvider implements LiveSessionProvider {
         session: {
           model: this.options.model,
           instructions: input.instructions,
+          client: {
+            data_channel: {
+              allowed_client_events: [
+                "session.commentary.append",
+                "session.close",
+              ],
+              allowed_server_events: [
+                { type: "session.started" },
+                { type: "session.commentary.appended" },
+                { type: "session.output_transcript.delta" },
+                { type: "session.closed" },
+                { type: "error" },
+              ],
+            },
+          },
         },
         transport: {
           type: "webrtc",
